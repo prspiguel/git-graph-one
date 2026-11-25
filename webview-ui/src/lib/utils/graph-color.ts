@@ -1,5 +1,5 @@
 /**
- * Built-in graph rail palette. Kept in sync with the `gitGraphPlus.graphColors`
+ * Built-in graph rail palette. Kept in sync with the `gitGraphOne.graphColors`
  * default in package.json and the extension's DEFAULT_GRAPH_COLORS. Used as the
  * palette store's initial value and as the fallback for an empty palette.
  */

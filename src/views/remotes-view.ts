@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { GitService } from '../git/git-service';
+import { isGitRestrictedMode } from '../git/git-binary';
 import type { RemoteInfo, BranchInfo } from '../git/types';
 
 type RemoteTreeItem = RemoteItem | RemoteBranchItem;
@@ -49,6 +50,7 @@ export class RemotesViewProvider implements vscode.TreeDataProvider<RemoteTreeIt
   async getChildren(element?: RemoteTreeItem): Promise<RemoteTreeItem[]> {
     if (!element) {
       if (this.rootCache) return this.rootCache;
+      if (isGitRestrictedMode()) return [];
       try { this.rootCache = (await this.gitService.remotes()).map(r => new RemoteItem(r)); }
       catch { /* ignore */ }
       return this.rootCache ?? [];
@@ -107,7 +109,7 @@ class RemoteBranchItem extends vscode.TreeItem {
     this.tooltip = branch.name;
 
     this.command = {
-      command: 'gitGraphPlus.showRemoteBranchMenu',
+      command: 'gitGraphOne.showRemoteBranchMenu',
       title: 'Show Remote Branch Menu',
       arguments: [{ branch: this.branch }],
     };

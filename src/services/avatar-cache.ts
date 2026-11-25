@@ -19,6 +19,26 @@ const DEFAULT_MAX_DISK_ENTRIES = 1000;
 // per day is nowhere near the per-render hammering we set out to eliminate.
 const DEFAULT_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
+const ALLOWED_AVATAR_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+
+function sanitizeAvatarSize(size: unknown): number {
+  if (typeof size === 'number' && Number.isInteger(size) && size >= 8 && size <= 512) {
+    return size;
+  }
+  return 32;
+}
+
+function sanitizeAvatarMime(contentType: unknown): string {
+  if (typeof contentType !== 'string') return 'image/png';
+  const base = contentType.split(';')[0].trim().toLowerCase();
+  return ALLOWED_AVATAR_MIMES.has(base) ? base : 'image/png';
+}
+
 function md5(input: string): string {
   return createHash('md5').update(input).digest('hex');
 }
@@ -48,8 +68,10 @@ export class AvatarCache {
 
   /** Returns a base64 data URI for the avatar, or null if it cannot be loaded. */
   async get(email: string, size: number): Promise<string | null> {
+    if (typeof email !== 'string') return null;
+    const safeSize = sanitizeAvatarSize(size);
     const norm = normalizeEmail(email);
-    const key = `${norm}:${size}`;
+    const key = `${norm}:${safeSize}`;
 
     const mem = this.memory.get(key);
     if (mem !== undefined) {
@@ -62,7 +84,7 @@ export class AvatarCache {
     const existing = this.inflight.get(key);
     if (existing) return existing;
 
-    const promise = this.load(key, norm, size).finally(() => this.inflight.delete(key));
+    const promise = this.load(key, norm, safeSize).finally(() => this.inflight.delete(key));
     this.inflight.set(key, promise);
     return promise;
   }
@@ -98,7 +120,7 @@ export class AvatarCache {
       return staleDataUri;
     }
 
-    const mime = res.contentType || 'image/png';
+    const mime = sanitizeAvatarMime(res.contentType);
     const dataUri = `data:${mime};base64,${res.data.toString('base64')}`;
     this.remember(key, dataUri);
 

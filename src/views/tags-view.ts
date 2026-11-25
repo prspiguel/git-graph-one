@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { GitService } from '../git/git-service';
+import { isGitRestrictedMode } from '../git/git-binary';
 import type { TagInfo } from '../git/types';
 
 export class TagsViewProvider implements vscode.TreeDataProvider<TagItem> {
@@ -39,6 +40,7 @@ export class TagsViewProvider implements vscode.TreeDataProvider<TagItem> {
   async getChildren(element?: TagItem): Promise<TagItem[]> {
     if (element) return [];
     if (this.cache) return this.cache;
+    if (isGitRestrictedMode()) return [];
     try { this.cache = (await this.gitService.tags()).map(t => new TagItem(t)); }
     catch { /* ignore */ }
     return this.cache ?? [];
@@ -54,7 +56,7 @@ class TagItem extends vscode.TreeItem {
     this.tooltip = tag.message ? `${tag.name}: ${tag.message}` : tag.name;
 
     this.command = {
-      command: 'gitGraphPlus.showTagMenu',
+      command: 'gitGraphOne.showTagMenu',
       title: 'Show Tag Menu',
       arguments: [{ tag: this.tag }],
     };

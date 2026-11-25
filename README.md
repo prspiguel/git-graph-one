@@ -1,4 +1,4 @@
-# Git Graph+
+# Git Graph One
 
 [![VS Code Marketplace](https://img.shields.io/badge/Install-VS%20Code%20Marketplace-007ACC?logo=visual-studio-code&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=the0807.git-graph-plus)
 [![Open VSX](https://img.shields.io/badge/Install-Open%20VSX-a60ee5?logo=eclipse-ide&logoColor=white)](https://open-vsx.org/extension/the0807/git-graph-plus)
@@ -12,9 +12,9 @@
 
 A modern, full-featured Git GUI for VS Code. Visualize your commit history, manage branches, and perform advanced git operations - all without leaving your editor.
 
-> Staging, committing, and inline blame use VS Code's built-in Source Control. Git Graph+ focuses on everything else.
+> Staging, committing, and inline blame use VS Code's built-in Source Control. Git Graph One focuses on everything else.
 
-![Git Graph+](resources/main.png)
+![Git Graph One](resources/main.png)
 
 ---
 
@@ -68,7 +68,7 @@ A modern, full-featured Git GUI for VS Code. Visualize your commit history, mana
 | **Amend**                | Amend the last commit directly from the graph with a single click                                    |
 | **Merge**                | Default, `--no-ff`, `--ff-only`, and squash merge strategies                                          |
 | **Rebase**               | Standard rebase and interactive rebase with drag-to-reorder UI                                        |
-| **Interactive Rebase**   | Keyboard-driven visual UI with action dropdown (pick, reword, edit, squash, fixup, drop), drop warnings, and an autosquash toggle that folds `fixup!`/`squash!` commits into their targets - start it from a branch or a multi-commit selection. An optional classic mode runs `git rebase -i` in an integrated terminal (`gitGraphPlus.interactiveRebase.mode`) |
+| **Interactive Rebase**   | Keyboard-driven visual UI with action dropdown (pick, reword, edit, squash, fixup, drop), drop warnings, and an autosquash toggle that folds `fixup!`/`squash!` commits into their targets - start it from a branch or a multi-commit selection. An optional classic mode runs `git rebase -i` in an integrated terminal (`gitGraphOne.interactiveRebase.mode`) |
 | **Drag to Rebase/Merge** | Drag one branch onto another in the graph to rebase it onto, or merge it into, the target             |
 | **Squash Commits**       | Select multiple consecutive commits in the graph and squash them into one                             |
 | **Fixup / Squash Commit** | Commit staged changes as a `fixup!` or `squash!` of any commit straight from its context menu, ready for autosquash |
@@ -158,7 +158,7 @@ A modern, full-featured Git GUI for VS Code. Visualize your commit history, mana
 ### Internationalization
 
 - English (default), Korean, and Chinese Simplified
-- Configurable via `gitGraphPlus.locale` setting
+- Configurable via `gitGraphOne.locale` setting
 - Git terms (commit, merge, rebase, push, pull, fetch, etc.) remain untranslated
 
 ---
@@ -167,9 +167,9 @@ A modern, full-featured Git GUI for VS Code. Visualize your commit history, mana
 
 1. Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=the0807.git-graph-plus)
 2. Open a folder containing a Git repository
-3. Open Git Graph+ using any of:
-   - **Command Palette** - `Git Graph+: Open`
-   - **Activity Bar** - Click the Git Graph+ icon
+3. Open Git Graph One using any of:
+   - **Command Palette** - `Git Graph One: Open`
+   - **Activity Bar** - Click the Git Graph One icon
    - **SCM title bar**, **Status bar**, or **Editor title bar** - Click the git-merge icon
 
 > [!Tip]
@@ -183,25 +183,25 @@ A modern, full-featured Git GUI for VS Code. Visualize your commit history, mana
 
 | Setting                                | Default       | Description                                              |
 | -------------------------------------- | ------------- | -------------------------------------------------------- |
-| `gitGraphPlus.autoRefresh`             | `true`        | Auto-refresh on repository changes                       |
-| `gitGraphPlus.timeout`                 | `60`          | Max time (seconds) to wait for a Git command before abort |
-| `gitGraphPlus.initialCommitCount`      | `200`         | Commits loaded on first render / refresh (lower = faster in huge repos) |
-| `gitGraphPlus.loadMoreCommitCount`     | `50`          | Extra commits fetched per **Load more commits** click    |
-| `gitGraphPlus.locale`                  | `auto`        | UI language (`auto`, `en`, `ko`, `zh-cn`)                |
-| `gitGraphPlus.graphSortOrder`          | `topological` | Commit sort order (`topological`, `date`, `author-date`) |
-| `gitGraphPlus.interactiveRebase.mode`  | `ui`          | Interactive rebase mode (`ui` visual editor, `classic` `git rebase -i` in a terminal) |
-| `gitGraphPlus.showSignatureStatus`     | `true`        | Show GPG/SSH signature status in the graph               |
-| `gitGraphPlus.commitMessageLinks`      | `[]`          | Custom `{ pattern, url }` regex rules that turn commit-message text into clickable links |
-| `gitGraphPlus.autoDetectRepoLinks`     | `true`        | Auto-link `#123` issues (github.com/gitlab.com) and `!123` GitLab MRs from the `origin` remote |
-| `gitGraphPlus.branchBadgeBarThickness` | `thin`        | Branch badge bar thickness (`thin`, `medium`, `thick`)   |
-| `gitGraphPlus.branchColors`            | `[]`          | Fixed branch colors by name pattern (regex → hex)        |
-| `gitGraphPlus.graphColors`             | 12 colors     | Color palette auto-assigned to graph rails (hex strings) |
+| `gitGraphOne.autoRefresh`             | `true`        | Auto-refresh on repository changes                       |
+| `gitGraphOne.timeout`                 | `60`          | Max time (seconds) to wait for a Git command before abort |
+| `gitGraphOne.initialCommitCount`      | `200`         | Commits loaded on first render / refresh (lower = faster in huge repos) |
+| `gitGraphOne.loadMoreCommitCount`     | `50`          | Extra commits fetched per **Load more commits** click    |
+| `gitGraphOne.locale`                  | `auto`        | UI language (`auto`, `en`, `ko`, `zh-cn`)                |
+| `gitGraphOne.graphSortOrder`          | `topological` | Commit sort order (`topological`, `date`, `author-date`) |
+| `gitGraphOne.interactiveRebase.mode`  | `ui`          | Interactive rebase mode (`ui` visual editor, `classic` `git rebase -i` in a terminal) |
+| `gitGraphOne.showSignatureStatus`     | `true`        | Show GPG/SSH signature status in the graph               |
+| `gitGraphOne.commitMessageLinks`      | `[]`          | Custom `{ pattern, url }` regex rules that turn commit-message text into clickable links |
+| `gitGraphOne.autoDetectRepoLinks`     | `true`        | Auto-link `#123` issues (github.com/gitlab.com) and `!123` GitLab MRs from the `origin` remote |
+| `gitGraphOne.branchBadgeBarThickness` | `thin`        | Branch badge bar thickness (`thin`, `medium`, `thick`)   |
+| `gitGraphOne.branchColors`            | `[]`          | Fixed branch colors by name pattern (regex → hex)        |
+| `gitGraphOne.graphColors`             | 12 colors     | Color palette auto-assigned to graph rails (hex strings) |
 
 ### Operation Defaults
 
-Preset the default options for each operation dialog under `gitGraphPlus.defaults.*` (configure in VS Code Settings):
+Preset the default options for each operation dialog under `gitGraphOne.defaults.*` (configure in VS Code Settings):
 
-| Operation       | Options (under `gitGraphPlus.defaults.`)                                                     |
+| Operation       | Options (under `gitGraphOne.defaults.`)                                                     |
 | --------------- | -------------------------------------------------------------------------------------------- |
 | Push            | `push.force`, `push.setUpstream`, `push.allTags`                                             |
 | Pull            | `pull.rebase`, `pull.stash`                                                                  |

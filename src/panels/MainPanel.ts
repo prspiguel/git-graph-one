@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { readFile, access } from 'fs/promises';
+import { randomBytes } from 'crypto';
+import { readFile, access, realpath, stat } from 'fs/promises';
 import { GitService, GitError } from '../git/git-service';
 import { formatGitError, isAuthFailure, transportFromRemoteUrl } from '../git/git-error-formatter';
 import { splitUpstreamRef } from '../git/git-parser';
 import { samePath } from '../utils/path';
-import { readTimeoutMs, readInitialCommitCount, readLoadMoreCommitCount, readInteractiveRebaseMode } from '../utils/config';
+import { readTimeoutMs, readInitialCommitCount, readLoadMoreCommitCount, readInteractiveRebaseMode, readAutoRefreshEnabled } from '../utils/config';
 import { buildClassicRebaseCommand } from '../git/classic-rebase';
 import { buildFullGraph } from '../git/git-graph-builder';
 import { compileBranchColorRules, makeBranchColorResolver } from '../git/branch-color-resolver';
@@ -26,7 +27,7 @@ import { resolveDefaultWorktreePath } from '../utils/worktree-path';
 
 export class MainPanel {
   public static currentPanel: MainPanel | undefined;
-  private static readonly viewType = 'gitGraphPlus';
+  private static readonly viewType = 'gitGraphOne';
   private static savedRemoteFilter: string[] | undefined = undefined;
   private static savedBranchFilter: string[] | undefined = undefined;
   private static extraEnv: Record<string, string> | undefined = undefined;
@@ -109,7 +110,7 @@ export class MainPanel {
     svc.setWarningHandler(msg => {
       // Surface non-fatal git failures (e.g., stash log / uncommitted status / remote list
       // failures) to the webview so the user knows the displayed graph may be incomplete.
-      this.post({ type: 'error', payload: { message: `Git Graph+: ${msg}` } });
+      this.post({ type: 'error', payload: { message: `Git Graph One: ${msg}` } });
     });
     // On auth failure (missing/invalid HTTPS credentials), route through the
     // built-in `vscode.git` extension so the user sees the same credential
@@ -121,7 +122,7 @@ export class MainPanel {
   }
 
   private readModalDefaults(): ModalDefaults {
-    const cfg = vscode.workspace.getConfiguration('gitGraphPlus');
+    const cfg = vscode.workspace.getConfiguration('gitGraphOne');
     const g = <T>(key: string, fallback: T): T => cfg.get<T>(`defaults.${key}`, fallback);
     return {
       push: { force: g('push.force', 'none'), setUpstream: g('push.setUpstream', true), allTags: g('push.allTags', false) },
@@ -147,25 +148,25 @@ export class MainPanel {
   // Width (px) of the colored branch-badge bar, mapped from the user setting.
   private readBadgeBarWidth(): number {
     const level = vscode.workspace
-      .getConfiguration('gitGraphPlus')
+      .getConfiguration('gitGraphOne')
       .get<'thin' | 'medium' | 'thick'>('branchBadgeBarThickness', 'thin');
     return level === 'thick' ? 8 : level === 'medium' ? 6 : 4;
   }
 
   private makeBranchColorResolver(): (name: string) => string | undefined {
-    const raw = vscode.workspace.getConfiguration('gitGraphPlus').get('branchColors');
+    const raw = vscode.workspace.getConfiguration('gitGraphOne').get('branchColors');
     return makeBranchColorResolver(compileBranchColorRules(raw));
   }
 
   // Validated graph rail palette from the user setting (falls back to default).
   private readGraphColors(): string[] {
-    const raw = vscode.workspace.getConfiguration('gitGraphPlus').get('graphColors');
+    const raw = vscode.workspace.getConfiguration('gitGraphOne').get('graphColors');
     return resolveGraphColors(raw);
   }
 
   // Resolve commit-message link rules from settings + the origin remote URL.
   private async getCommitLinkRules(): Promise<LinkRule[]> {
-    const cfg = vscode.workspace.getConfiguration('gitGraphPlus');
+    const cfg = vscode.workspace.getConfiguration('gitGraphOne');
     const custom = cfg.get('commitMessageLinks');
     const autoDetect = cfg.get<boolean>('autoDetectRepoLinks', true);
     let remoteUrl: string | null = null;
@@ -198,47 +199,47 @@ export class MainPanel {
     this.fileWatcher = new FileWatcher(repoPath, (what) => {
       this.onRepoChanged(what);
     });
-    this.fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
+    this.fileWatcher.enabled = readAutoRefreshEnabled();
     this.disposables.push(this.fileWatcher);
 
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('gitGraphPlus.autoRefresh')) {
-          this.fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
+        if (e.affectsConfiguration('gitGraphOne.autoRefresh')) {
+          this.fileWatcher.enabled = readAutoRefreshEnabled();
         }
-        if (e.affectsConfiguration('gitGraphPlus.graphSortOrder')) {
+        if (e.affectsConfiguration('gitGraphOne.graphSortOrder')) {
           this.refreshAll();
         }
-        if (e.affectsConfiguration('gitGraphPlus.locale')) {
-          const localeSetting = vscode.workspace.getConfiguration('gitGraphPlus').get<string>('locale', 'auto');
+        if (e.affectsConfiguration('gitGraphOne.locale')) {
+          const localeSetting = vscode.workspace.getConfiguration('gitGraphOne').get<string>('locale', 'auto');
           const locale = localeSetting === 'auto' ? (vscode.env.language || 'en') : localeSetting;
           this.post({ type: 'setLocale', payload: { locale } });
         }
-        if (e.affectsConfiguration('gitGraphPlus.interactiveRebase.mode')) {
+        if (e.affectsConfiguration('gitGraphOne.interactiveRebase.mode')) {
           this.post({ type: 'setInteractiveRebaseMode', payload: { mode: readInteractiveRebaseMode() } });
         }
-        if (e.affectsConfiguration('gitGraphPlus.defaults')) {
+        if (e.affectsConfiguration('gitGraphOne.defaults')) {
           this.post({ type: 'setDefaults', payload: this.readModalDefaults() });
         }
-        if (e.affectsConfiguration('gitGraphPlus.branchBadgeBarThickness')) {
+        if (e.affectsConfiguration('gitGraphOne.branchBadgeBarThickness')) {
           this.post({ type: 'setBadgeBarThickness', payload: { width: this.readBadgeBarWidth() } });
         }
-        if (e.affectsConfiguration('gitGraphPlus.loadMoreCommitCount')) {
+        if (e.affectsConfiguration('gitGraphOne.loadMoreCommitCount')) {
           this.post({ type: 'setLoadMoreCount', payload: { count: readLoadMoreCommitCount() } });
         }
-        if (e.affectsConfiguration('gitGraphPlus.branchColors')) {
+        if (e.affectsConfiguration('gitGraphOne.branchColors')) {
           this.refreshAll();
         }
-        if (e.affectsConfiguration('gitGraphPlus.graphColors')) {
+        if (e.affectsConfiguration('gitGraphOne.graphColors')) {
           this.post({ type: 'setGraphColors', payload: { colors: this.readGraphColors() } });
         }
         if (
-          e.affectsConfiguration('gitGraphPlus.commitMessageLinks') ||
-          e.affectsConfiguration('gitGraphPlus.autoDetectRepoLinks')
+          e.affectsConfiguration('gitGraphOne.commitMessageLinks') ||
+          e.affectsConfiguration('gitGraphOne.autoDetectRepoLinks')
         ) {
           void this.postCommitLinkRules();
         }
-        if (e.affectsConfiguration('gitGraphPlus.timeout')) {
+        if (e.affectsConfiguration('gitGraphOne.timeout')) {
           this.gitService.setDefaultTimeout(readTimeoutMs());
         }
       })
@@ -247,7 +248,7 @@ export class MainPanel {
     this.panel.webview.html = this.getHtmlForWebview(this.panel.webview);
 
     // Send locale to webview
-    const localeSetting = vscode.workspace.getConfiguration('gitGraphPlus').get<string>('locale', 'auto');
+    const localeSetting = vscode.workspace.getConfiguration('gitGraphOne').get<string>('locale', 'auto');
     const locale = localeSetting === 'auto' ? (vscode.env.language || 'en') : localeSetting;
     const homeDir = process.env.HOME || process.env.USERPROFILE || '';
     this.post({ type: 'setLocale', payload: { locale, homeDir } });
@@ -290,7 +291,7 @@ export class MainPanel {
     }
 
     if (!repoPath) {
-      vscode.window.showWarningMessage('Git Graph+: No workspace folder open.');
+      vscode.window.showWarningMessage('Git Graph One: No workspace folder open.');
       return;
     }
 
@@ -305,7 +306,7 @@ export class MainPanel {
 
     const panel = vscode.window.createWebviewPanel(
       MainPanel.viewType,
-      'Git Graph+',
+      'Git Graph One',
       vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -328,6 +329,12 @@ export class MainPanel {
 
   public async postRefresh(): Promise<void> {
     await this.refreshAll();
+  }
+
+  /** Re-enable auto-refresh and reload the graph once the user trusts the workspace. */
+  public onWorkspaceTrusted(): void {
+    this.fileWatcher.enabled = readAutoRefreshEnabled();
+    void this.refreshAll();
   }
 
   /**
@@ -355,7 +362,7 @@ export class MainPanel {
     const oldIdx = this.disposables.indexOf(oldWatcher);
     if (oldIdx >= 0) { this.disposables.splice(oldIdx, 1); }
     this.fileWatcher = new FileWatcher(newPath, (what) => this.onRepoChanged(what));
-    this.fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
+    this.fileWatcher.enabled = readAutoRefreshEnabled();
     this.disposables.push(this.fileWatcher);
 
     MainPanel.onRepoChange?.(newPath);
@@ -401,7 +408,7 @@ export class MainPanel {
     try {
       switch (message.type) {
         case 'getLog': {
-          const cfg = vscode.workspace.getConfiguration('gitGraphPlus');
+          const cfg = vscode.workspace.getConfiguration('gitGraphOne');
           const sortOrder = cfg.get<'author-date' | 'date' | 'topological'>('graphSortOrder', 'topological');
           const includeSignature = cfg.get<boolean>('showSignatureStatus', true);
           const requestedLimit = message.payload.limit ?? readInitialCommitCount();
@@ -772,7 +779,7 @@ export class MainPanel {
         }
         case 'openExtensionSettings': {
           // Opens VS Code Settings pre-filtered to this extension's settings.
-          await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:the0807.git-graph-plus');
+          await vscode.commands.executeCommand('workbench.action.openSettings', 'gitGraphOne');
           break;
         }
         case 'amendCommit': {
@@ -977,7 +984,7 @@ export class MainPanel {
         case 'runClassicRebase': {
           const command = buildClassicRebaseCommand(message.payload.base);
           if (!command) { break; }
-          const name = 'Git Graph+ Rebase';
+          const name = 'Git Graph One Rebase';
           const terminal =
             vscode.window.terminals.find(t => t.name === name && t.exitStatus === undefined)
             ?? vscode.window.createTerminal({ name, cwd: this.repoPath });
@@ -1462,13 +1469,24 @@ export class MainPanel {
           try {
             let base64: string;
             if (ref === 'working') {
-              // Read from working tree
-              const fullPath = path.join(this.repoPath, filePath);
-              const relative = path.relative(this.repoPath, fullPath);
-              if (relative.startsWith('..') || path.isAbsolute(relative)) {
-                throw new Error('Invalid file path');
+              // Read from working tree: validate both lexical and resolved
+              // realpath so symlinks inside the repo cannot read arbitrary
+              // files on disk, and cap file size to match getImageBase64.
+              const fullPath = this.resolveRepoRelativePath(filePath, 'getImageAtRef');
+              const [realRoot, realFile] = await Promise.all([
+                realpath(this.repoPath),
+                realpath(fullPath),
+              ]);
+              const realRel = path.relative(realRoot, realFile);
+              if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+                throw new Error('File symlink escapes repository');
               }
-              const buffer = await readFile(fullPath);
+              const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
+              const fileStat = await stat(realFile);
+              if (fileStat.size > MAX_IMAGE_SIZE) {
+                throw new Error('Image file too large');
+              }
+              const buffer = await readFile(realFile);
               base64 = buffer.toString('base64');
             } else {
               base64 = await this.gitService.getImageBase64(ref, filePath);
@@ -1777,7 +1795,7 @@ export class MainPanel {
     // would arrive ~immediately after; absorb them so they don't fire a second pass.
     this.fileWatcher.suppress();
     try {
-      const refreshCfg = vscode.workspace.getConfiguration('gitGraphPlus');
+      const refreshCfg = vscode.workspace.getConfiguration('gitGraphOne');
       const sortOrder = refreshCfg.get<'author-date' | 'date' | 'topological'>('graphSortOrder', 'topological');
       const includeSignature = refreshCfg.get<boolean>('showSignatureStatus', true);
       const refreshLimit = this.currentLimit || readInitialCommitCount();
@@ -1829,7 +1847,7 @@ export class MainPanel {
         MainPanel.onSidebarRefresh?.();
       }
     } catch (err) {
-      console.warn('Git Graph+: refresh failed:', err instanceof Error ? err.message : err);
+      console.warn('Git Graph One: refresh failed:', err instanceof Error ? err.message : err);
       if (err instanceof GitError && /not a git repository/.test(err.stderr)) {
         try { this.post({ type: 'notGitRepo' }); } catch { /* panel disposed */ }
       }
@@ -1986,7 +2004,7 @@ export class MainPanel {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource};">
   <link rel="stylesheet" href="${codiconUri}">
   <link rel="stylesheet" href="${styleUri}">
-  <title>Git Graph+</title>
+  <title>Git Graph One</title>
 </head>
 <body>
   <div id="app"></div>
@@ -2015,10 +2033,5 @@ export class MainPanel {
 }
 
 function getNonce(): string {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
+  return randomBytes(16).toString('hex');
 }

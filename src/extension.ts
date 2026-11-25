@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { existsSync } from 'fs';
-import { setGitBinaryPath } from './git/git-binary';
+import { setGitBinaryPath, setGitRestrictedMode } from './git/git-binary';
 import { MainPanel } from './panels/MainPanel';
 import { GitService } from './git/git-service';
 import { FileWatcher } from './services/file-watcher';
@@ -14,7 +14,7 @@ import { StatusBarManager } from './views/status-bar';
 import { RepoDiscoveryService } from './services/repo-discovery';
 import { samePath } from './utils/path';
 import { resolveDefaultWorktreePath } from './utils/worktree-path';
-import { readTimeoutMs } from './utils/config';
+import { readTimeoutMs, readAutoRefreshEnabled } from './utils/config';
 
 /**
  * Resolve the `git.path` setting to an existing executable. The setting may be
@@ -42,11 +42,11 @@ export function activate(context: vscode.ExtensionContext) {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
     context.subscriptions.push(
-      vscode.commands.registerCommand('git-graph-plus.open', () => {
-        vscode.window.showWarningMessage('Git Graph+: No workspace folder open.');
+      vscode.commands.registerCommand('git-graph-one.open', () => {
+        vscode.window.showWarningMessage('Git Graph One: No workspace folder open.');
       }),
-      vscode.commands.registerCommand('gitGraphPlus.open', () => {
-        vscode.window.showWarningMessage('Git Graph+: No workspace folder open.');
+      vscode.commands.registerCommand('gitGraphOne.open', () => {
+        vscode.window.showWarningMessage('Git Graph One: No workspace folder open.');
       }),
     );
     // VS Code does not re-run activate() when the user opens a folder later
@@ -58,7 +58,7 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.workspace.onDidChangeWorkspaceFolders(async (e) => {
         if (e.added.length === 0) return;
         const reload = await vscode.window.showInformationMessage(
-          vscode.l10n.t('Git Graph+: Reload window to activate the extension for the newly opened folder?'),
+          vscode.l10n.t('Git Graph One: Reload window to activate the extension for the newly opened folder?'),
           vscode.l10n.t('Reload'),
         );
         if (reload) {
@@ -78,6 +78,9 @@ export function activate(context: vscode.ExtensionContext) {
   let apiGitPath: string | undefined;
   const applyGitPath = () => setGitBinaryPath(resolveConfiguredGitPath() ?? apiGitPath);
   applyGitPath();
+  // Untrusted workspaces: repo config may name programs git runs (e.g.
+  // core.fsmonitor). Keep the extension in restricted mode until trusted.
+  setGitRestrictedMode(!vscode.workspace.isTrusted);
 
   let activeGitService = new GitService(activeRepoPath);
   activeGitService.setDefaultTimeout(readTimeoutMs());
@@ -107,7 +110,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('git.path')) applyGitPath();
-      if (e.affectsConfiguration('gitGraphPlus.timeout')) activeGitService.setDefaultTimeout(readTimeoutMs());
+      if (e.affectsConfiguration('gitGraphOne.timeout')) activeGitService.setDefaultTimeout(readTimeoutMs());
     }),
   );
 
@@ -118,11 +121,11 @@ export function activate(context: vscode.ExtensionContext) {
   const stashesProvider = new StashesViewProvider(activeGitService);
   const worktreesProvider = new WorktreesViewProvider(activeGitService);
 
-  const branchesView = vscode.window.createTreeView('gitGraphPlus.branches', { treeDataProvider: branchesProvider });
-  const remotesView = vscode.window.createTreeView('gitGraphPlus.remotes', { treeDataProvider: remotesProvider });
-  const tagsView = vscode.window.createTreeView('gitGraphPlus.tags', { treeDataProvider: tagsProvider });
-  const stashesView = vscode.window.createTreeView('gitGraphPlus.stashes', { treeDataProvider: stashesProvider });
-  const worktreesView = vscode.window.createTreeView('gitGraphPlus.worktrees', { treeDataProvider: worktreesProvider });
+  const branchesView = vscode.window.createTreeView('gitGraphOne.branches', { treeDataProvider: branchesProvider });
+  const remotesView = vscode.window.createTreeView('gitGraphOne.remotes', { treeDataProvider: remotesProvider });
+  const tagsView = vscode.window.createTreeView('gitGraphOne.tags', { treeDataProvider: tagsProvider });
+  const stashesView = vscode.window.createTreeView('gitGraphOne.stashes', { treeDataProvider: stashesProvider });
+  const worktreesView = vscode.window.createTreeView('gitGraphOne.worktrees', { treeDataProvider: worktreesProvider });
 
   const initialRepoName = path.basename(activeRepoPath);
   branchesView.description = initialRepoName;
@@ -144,14 +147,17 @@ export function activate(context: vscode.ExtensionContext) {
     worktreesView,
   );
 
-  // Prefetch all tree view data in parallel so first expand is instant
-  Promise.all([
-    branchesProvider.prefetch(),
-    remotesProvider.prefetch(),
-    tagsProvider.prefetch(),
-    stashesProvider.prefetch(),
-    worktreesProvider.prefetch(),
-  ]).catch((err) => { console.warn('Git Graph+: sidebar prefetch failed:', err instanceof Error ? err.message : err); });
+  // Prefetch all tree view data in parallel so first expand is instant.
+  // Skipped in untrusted workspaces: it runs git without a user action.
+  if (vscode.workspace.isTrusted) {
+    Promise.all([
+      branchesProvider.prefetch(),
+      remotesProvider.prefetch(),
+      tagsProvider.prefetch(),
+      stashesProvider.prefetch(),
+      worktreesProvider.prefetch(),
+    ]).catch((err) => { console.warn('Git Graph One: sidebar prefetch failed:', err instanceof Error ? err.message : err); });
+  }
 
   // --- File Watcher ---
   // This watcher owns the sidebar; the graph panel runs its own FileWatcher
@@ -163,7 +169,7 @@ export function activate(context: vscode.ExtensionContext) {
   let fileWatcher = new FileWatcher(activeRepoPath, () => {
     refreshAll();
   });
-  fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
+  fileWatcher.enabled = readAutoRefreshEnabled();
   context.subscriptions.push({ dispose: () => fileWatcher.dispose() });
 
   // Working-tree saves are already caught by FileWatcher's '**' watcher (it
@@ -174,44 +180,65 @@ export function activate(context: vscode.ExtensionContext) {
   // even when autoRefresh was off — so it was removed.
 
   // --- Auto-detect Git Repo if root isn't one ---
-  RepoDiscoveryService.discoverRepos([activeRepoPath]).then(repos => {
-    if (repos.length > 0 && !repos.some(r => samePath(r.path, activeRepoPath))) {
-      const firstRepo = repos[0].path;
-      activeRepoPath = firstRepo;
-      activeGitService = new GitService(activeRepoPath);
-      activeGitService.setDefaultTimeout(readTimeoutMs());
+  // Skipped in untrusted workspaces so activation never spawns git automatically.
+  const runInitialRepoDiscovery = () => {
+    RepoDiscoveryService.discoverRepos([activeRepoPath]).then(repos => {
+      if (repos.length > 0 && !repos.some(r => samePath(r.path, activeRepoPath))) {
+        const firstRepo = repos[0].path;
+        activeRepoPath = firstRepo;
+        activeGitService = new GitService(activeRepoPath);
+        activeGitService.setDefaultTimeout(readTimeoutMs());
 
-      // Re-inject environment if needed
-      if (builtinGit && builtinGit.exports) {
-        try {
-          const env = (builtinGit.exports as any).getAPI(1)?.git?.env;
-          if (env) { activeGitService.setExtraEnv(env); }
-        } catch { /* ignore */ }
+        // Re-inject environment if needed
+        if (builtinGit && builtinGit.exports) {
+          try {
+            const env = (builtinGit.exports as any).getAPI(1)?.git?.env;
+            if (env) { activeGitService.setExtraEnv(env); }
+          } catch { /* ignore */ }
+        }
+        
+        // Update providers
+        branchesProvider.setGitService(activeGitService);
+        remotesProvider.setGitService(activeGitService);
+        tagsProvider.setGitService(activeGitService);
+        stashesProvider.setGitService(activeGitService);
+        worktreesProvider.setGitService(activeGitService);
+
+        // Update view descriptions
+        const repoName = path.basename(activeRepoPath);
+        branchesView.description = repoName;
+        remotesView.description = repoName;
+        tagsView.description = repoName;
+        stashesView.description = repoName;
+        worktreesView.description = repoName;
+
+        // Update file watcher (sidebar-only; see the watcher above for why).
+        fileWatcher.dispose();
+        fileWatcher = new FileWatcher(activeRepoPath, () => {
+          refreshAll();
+        });
+        fileWatcher.enabled = readAutoRefreshEnabled();
       }
-      
-      // Update providers
-      branchesProvider.setGitService(activeGitService);
-      remotesProvider.setGitService(activeGitService);
-      tagsProvider.setGitService(activeGitService);
-      stashesProvider.setGitService(activeGitService);
-      worktreesProvider.setGitService(activeGitService);
+    }).catch((err) => { console.warn('Git Graph One: repo discovery failed:', err instanceof Error ? err.message : err); });
+  };
 
-      // Update view descriptions
-      const repoName = path.basename(activeRepoPath);
-      branchesView.description = repoName;
-      remotesView.description = repoName;
-      tagsView.description = repoName;
-      stashesView.description = repoName;
-      worktreesView.description = repoName;
+  if (vscode.workspace.isTrusted) {
+    runInitialRepoDiscovery();
+  }
 
-      // Update file watcher (sidebar-only; see the watcher above for why).
-      fileWatcher.dispose();
-      fileWatcher = new FileWatcher(activeRepoPath, () => {
-        refreshAll();
-      });
-      fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
-    }
-  }).catch((err) => { console.warn('Git Graph+: repo discovery failed:', err instanceof Error ? err.message : err); });
+  // Lift restricted mode automatically if the user grants workspace trust
+  // during the session, without requiring a window reload.
+  if (typeof vscode.workspace.onDidGrantWorkspaceTrust === 'function') {
+    context.subscriptions.push(
+      vscode.workspace.onDidGrantWorkspaceTrust(() => {
+        setGitRestrictedMode(false);
+        fileWatcher.enabled = readAutoRefreshEnabled();
+        runInitialRepoDiscovery();
+        doSidebarRefresh();
+        MainPanel.currentPanel?.onWorkspaceTrusted();
+      }),
+    );
+  }
 
   // When workspace folders change (multi-root add/remove), re-discover repos
   // so the repo dropdown in the panel reflects reality. The panel-side
@@ -306,7 +333,7 @@ export function activate(context: vscode.ExtensionContext) {
     fileWatcher = new FileWatcher(newPath, () => {
       refreshAll();
     });
-    fileWatcher.enabled = vscode.workspace.getConfiguration('gitGraphPlus').get<boolean>('autoRefresh', true);
+    fileWatcher.enabled = readAutoRefreshEnabled();
 
     // If the webview panel is open, sync it to the new repo as well.
     // MainPanel.switchRepo() will call onRepoChange → switchToRepo again,
@@ -374,31 +401,31 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('git-graph-plus.open', (sourceControl?: vscode.SourceControl) => {
+    vscode.commands.registerCommand('git-graph-one.open', (sourceControl?: vscode.SourceControl) => {
       if (sourceControl?.rootUri) { switchToRepo(sourceControl.rootUri.fsPath); }
       MainPanel.createOrShow(context.extensionUri, activeRepoPath);
     }),
-    vscode.commands.registerCommand('gitGraphPlus.open', (sourceControl?: vscode.SourceControl) => {
+    vscode.commands.registerCommand('gitGraphOne.open', (sourceControl?: vscode.SourceControl) => {
       if (sourceControl?.rootUri) { switchToRepo(sourceControl.rootUri.fsPath); }
       MainPanel.createOrShow(context.extensionUri, activeRepoPath);
     }),
-    vscode.commands.registerCommand('gitGraphPlus.refresh', () => {
+    vscode.commands.registerCommand('gitGraphOne.refresh', () => {
       refreshAll();
       MainPanel.currentPanel?.postRefresh();
     }),
-    vscode.commands.registerCommand('gitGraphPlus.fetch', () => {
+    vscode.commands.registerCommand('gitGraphOne.fetch', () => {
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'fetch' });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.pull', () => {
+    vscode.commands.registerCommand('gitGraphOne.pull', () => {
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'pull' });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.push', () => {
+    vscode.commands.registerCommand('gitGraphOne.push', () => {
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'push' });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.publishBranch', () => {
+    vscode.commands.registerCommand('gitGraphOne.publishBranch', () => {
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'push' });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.checkoutBranch', (branchItem) => {
+    vscode.commands.registerCommand('gitGraphOne.checkoutBranch', (branchItem) => {
       if (branchItem?.branch) {
         activeGitService.checkout(branchItem.branch.name).then(() => {
           refreshAll();
@@ -406,40 +433,40 @@ export function activate(context: vscode.ExtensionContext) {
         }).catch(err => vscode.window.showErrorMessage(err.message));
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.checkoutRemoteBranch', (branchItem) => {
+    vscode.commands.registerCommand('gitGraphOne.checkoutRemoteBranch', (branchItem) => {
       if (branchItem?.branch) {
         const ref = branchItem.branch.name; // e.g. origin/main
         const localName = ref.split('/').slice(1).join('/');
         MainPanel.showModalWithPanel(context.extensionUri, { modal: 'checkoutRemote', remoteName: ref, localName });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.mergeBranch', (branchItem) => {
+    vscode.commands.registerCommand('gitGraphOne.mergeBranch', (branchItem) => {
       const branchName = branchItem?.branch?.name;
       if (branchName) {
         MainPanel.showModalWithPanel(context.extensionUri, { modal: 'mergeBranch', branchName });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.stashApply', (stashItem) => {
+    vscode.commands.registerCommand('gitGraphOne.stashApply', (stashItem) => {
       const index = stashItem?.index ?? 0;
       activeGitService.stashApply(index).then(() => {
         refreshAll();
         MainPanel.currentPanel?.postRefresh();
       }).catch(err => vscode.window.showErrorMessage(err.message));
     }),
-    vscode.commands.registerCommand('gitGraphPlus.stashPop', (stashItem) => {
+    vscode.commands.registerCommand('gitGraphOne.stashPop', (stashItem) => {
       const index = stashItem?.index ?? 0;
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'stashPop', index, message: stashItem?.stash?.message ?? `stash@{${index}}` });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.createBranch', () => {
+    vscode.commands.registerCommand('gitGraphOne.createBranch', () => {
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'createBranch' });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.stashSave', () => {
+    vscode.commands.registerCommand('gitGraphOne.stashSave', () => {
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'stashSave' });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.createTag', () => {
+    vscode.commands.registerCommand('gitGraphOne.createTag', () => {
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'createTag' });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.pushTag', (tagItem) => {
+    vscode.commands.registerCommand('gitGraphOne.pushTag', (tagItem) => {
       const tagName = tagItem?.tag?.name;
       if (tagName) {
         activeGitService.pushTag(tagName).then(() => {
@@ -449,53 +476,53 @@ export function activate(context: vscode.ExtensionContext) {
         }).catch(err => vscode.window.showErrorMessage(err.message));
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.pushAllTags', () => {
+    vscode.commands.registerCommand('gitGraphOne.pushAllTags', () => {
       activeGitService.pushAllTags().then(() => {
         refreshAll();
         MainPanel.currentPanel?.postRefresh();
         vscode.window.showInformationMessage(`Pushed all tags`);
       }).catch(err => vscode.window.showErrorMessage(err.message));
     }),
-    vscode.commands.registerCommand('gitGraphPlus.deleteRemoteTag', (tagItem) => {
+    vscode.commands.registerCommand('gitGraphOne.deleteRemoteTag', (tagItem) => {
       const tagName = tagItem?.tag?.name;
       if (tagName) {
         MainPanel.showModalWithPanel(context.extensionUri, { modal: 'deleteRemoteTag', tagName });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.deleteBranch', (branchItem) => {
+    vscode.commands.registerCommand('gitGraphOne.deleteBranch', (branchItem) => {
       const branchName = branchItem?.branch?.name;
       if (branchName) {
         MainPanel.showModalWithPanel(context.extensionUri, { modal: 'deleteBranch', branchName });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.renameBranch', (branchItem) => {
+    vscode.commands.registerCommand('gitGraphOne.renameBranch', (branchItem) => {
       const oldName = branchItem?.branch?.name;
       if (oldName) {
         MainPanel.showModalWithPanel(context.extensionUri, { modal: 'renameBranch', branchName: oldName });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.deleteTag', (tagItem) => {
+    vscode.commands.registerCommand('gitGraphOne.deleteTag', (tagItem) => {
       const tagName = tagItem?.tag?.name;
       if (tagName) {
         MainPanel.showModalWithPanel(context.extensionUri, { modal: 'deleteTag', tagName });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.stashDrop', (stashItem) => {
+    vscode.commands.registerCommand('gitGraphOne.stashDrop', (stashItem) => {
       const index = stashItem?.index ?? 0;
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'stashDrop', index, message: stashItem?.stash?.message ?? `stash@{${index}}` });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.addWorktree', async () => {
+    vscode.commands.registerCommand('gitGraphOne.addWorktree', async () => {
       const defaultPath = await resolveDefaultWorktreePath(activeGitService, activeRepoPath);
       MainPanel.showModalWithPanel(context.extensionUri, { modal: 'addWorktree', defaultPath });
     }),
-    vscode.commands.registerCommand('gitGraphPlus.pruneWorktrees', () => {
+    vscode.commands.registerCommand('gitGraphOne.pruneWorktrees', () => {
       activeGitService.worktreePrune().then(() => {
         refreshAll();
         MainPanel.currentPanel?.postRefresh();
         vscode.window.showInformationMessage(`Pruned worktrees`);
       }).catch((err: Error) => vscode.window.showErrorMessage(err.message));
     }),
-    vscode.commands.registerCommand('gitGraphPlus.showRemoteBranchMenu', (branchItem) => {
+    vscode.commands.registerCommand('gitGraphOne.showRemoteBranchMenu', (branchItem) => {
       const branch = branchItem?.branch;
       if (branch) {
         const remote = branch.name.split('/')[0];
@@ -513,7 +540,7 @@ export function activate(context: vscode.ExtensionContext) {
         });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.showBranchMenu', (branchItem) => {
+    vscode.commands.registerCommand('gitGraphOne.showBranchMenu', (branchItem) => {
       const branch = branchItem?.branch;
       if (branch) {
         vscode.window.showQuickPick([
@@ -524,15 +551,15 @@ export function activate(context: vscode.ExtensionContext) {
         ]).then(selected => {
           if (!selected) return;
           switch (selected.id) {
-            case 'checkout': vscode.commands.executeCommand('gitGraphPlus.checkoutBranch', branchItem); break;
-            case 'merge': vscode.commands.executeCommand('gitGraphPlus.mergeBranch', branchItem); break;
-            case 'rename': vscode.commands.executeCommand('gitGraphPlus.renameBranch', branchItem); break;
-            case 'delete': vscode.commands.executeCommand('gitGraphPlus.deleteBranch', branchItem); break;
+            case 'checkout': vscode.commands.executeCommand('gitGraphOne.checkoutBranch', branchItem); break;
+            case 'merge': vscode.commands.executeCommand('gitGraphOne.mergeBranch', branchItem); break;
+            case 'rename': vscode.commands.executeCommand('gitGraphOne.renameBranch', branchItem); break;
+            case 'delete': vscode.commands.executeCommand('gitGraphOne.deleteBranch', branchItem); break;
           }
         });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.showTagMenu', (tagItem) => {
+    vscode.commands.registerCommand('gitGraphOne.showTagMenu', (tagItem) => {
       const tag = tagItem?.tag;
       if (tag) {
         vscode.window.showQuickPick([
@@ -542,14 +569,14 @@ export function activate(context: vscode.ExtensionContext) {
         ]).then(selected => {
           if (!selected) return;
           switch (selected.id) {
-            case 'push': vscode.commands.executeCommand('gitGraphPlus.pushTag', tagItem); break;
-            case 'delete': vscode.commands.executeCommand('gitGraphPlus.deleteTag', tagItem); break;
-            case 'deleteRemote': vscode.commands.executeCommand('gitGraphPlus.deleteRemoteTag', tagItem); break;
+            case 'push': vscode.commands.executeCommand('gitGraphOne.pushTag', tagItem); break;
+            case 'delete': vscode.commands.executeCommand('gitGraphOne.deleteTag', tagItem); break;
+            case 'deleteRemote': vscode.commands.executeCommand('gitGraphOne.deleteRemoteTag', tagItem); break;
           }
         });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.showStashMenu', (stashItem) => {
+    vscode.commands.registerCommand('gitGraphOne.showStashMenu', (stashItem) => {
       const stash = stashItem?.stash;
       if (stash) {
         vscode.window.showQuickPick([
@@ -559,29 +586,29 @@ export function activate(context: vscode.ExtensionContext) {
         ]).then(selected => {
           if (!selected) return;
           switch (selected.id) {
-            case 'apply': vscode.commands.executeCommand('gitGraphPlus.stashApply', stashItem); break;
-            case 'pop': vscode.commands.executeCommand('gitGraphPlus.stashPop', stashItem); break;
-            case 'drop': vscode.commands.executeCommand('gitGraphPlus.stashDrop', stashItem); break;
+            case 'apply': vscode.commands.executeCommand('gitGraphOne.stashApply', stashItem); break;
+            case 'pop': vscode.commands.executeCommand('gitGraphOne.stashPop', stashItem); break;
+            case 'drop': vscode.commands.executeCommand('gitGraphOne.stashDrop', stashItem); break;
           }
         });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.checkoutRemoteBranchExplicit', (branch) => {
+    vscode.commands.registerCommand('gitGraphOne.checkoutRemoteBranchExplicit', (branch) => {
       if (branch) {
         const localName = branch.name.split('/').slice(1).join('/');
         MainPanel.showModalWithPanel(context.extensionUri, { modal: 'checkoutRemote', remoteName: branch.name, localName });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.deleteRemoteBranchExplicit', (branch) => {
+    vscode.commands.registerCommand('gitGraphOne.deleteRemoteBranchExplicit', (branch) => {
       if (branch) {
         const remote = branch.name.split('/')[0];
         const branchName = branch.name.split('/').slice(1).join('/');
         MainPanel.showModalWithPanel(context.extensionUri, { modal: 'deleteRemoteBranch', remote, name: branchName });
       }
     }),
-    vscode.commands.registerCommand('gitGraphPlus.openWorktree', openWorktree),
-    vscode.commands.registerCommand('gitGraphPlus.openWorktreeInFileExplorer', openWorktreeInFileExplorer),
-    vscode.commands.registerCommand('gitGraphPlus.removeWorktree', (wtItem) => {
+    vscode.commands.registerCommand('gitGraphOne.openWorktree', openWorktree),
+    vscode.commands.registerCommand('gitGraphOne.openWorktreeInFileExplorer', openWorktreeInFileExplorer),
+    vscode.commands.registerCommand('gitGraphOne.removeWorktree', (wtItem) => {
       if (wtItem?.worktree) {
         const wtPath = wtItem.worktree.path;
         const wtBranch = wtItem.worktree.branch;

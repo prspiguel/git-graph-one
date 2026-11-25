@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { GitService } from '../git/git-service';
+import { isGitRestrictedMode } from '../git/git-binary';
 import type { StashEntry } from '../git/types';
 
 export class StashesViewProvider implements vscode.TreeDataProvider<StashItem> {
@@ -39,6 +40,7 @@ export class StashesViewProvider implements vscode.TreeDataProvider<StashItem> {
   async getChildren(element?: StashItem): Promise<StashItem[]> {
     if (element) return [];
     if (this.cache) return this.cache;
+    if (isGitRestrictedMode()) return [];
     try { this.cache = (await this.gitService.stashList()).map(s => new StashItem(s)); }
     catch { /* ignore */ }
     return this.cache ?? [];
@@ -54,7 +56,7 @@ class StashItem extends vscode.TreeItem {
     this.tooltip = `${stash.message}\n${stash.date}`;
 
     this.command = {
-      command: 'gitGraphPlus.showStashMenu',
+      command: 'gitGraphOne.showStashMenu',
       title: 'Show Stash Menu',
       arguments: [{ stash: this.stash, index: this.stash.index }],
     };

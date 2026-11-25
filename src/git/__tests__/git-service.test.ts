@@ -372,6 +372,14 @@ describe('GitService', () => {
       await expect(service.worktreeAdd('/tmp/wt', undefined, '-foo')).rejects.toThrow("must not start with '-'");
     });
 
+    it('worktreeAdd rejects a path starting with -', async () => {
+      await expect(service.worktreeAdd('--detach', 'main')).rejects.toThrow("must not start with '-'");
+    });
+
+    it('worktreeRemove rejects a path starting with -', async () => {
+      await expect(service.worktreeRemove('--force')).rejects.toThrow("must not start with '-'");
+    });
+
     it('bisectStart rejects bad starting with -', async () => {
       await expect(service.bisectStart('-foo')).rejects.toThrow("must not start with '-'");
     });
@@ -1336,6 +1344,24 @@ describe('GitService', () => {
 
       await expect(service.flowInit(flowOpts))
         .rejects.toThrow("Branch 'main' does not exist");
+    });
+
+    it('rejects option-like branch or prefix inputs in flowInit', async () => {
+      await expect(service.flowInit({ ...flowOpts, productionBranch: '--exec=evil' })).rejects.toThrow();
+      await expect(service.flowInit({ ...flowOpts, developBranch: '-D' })).rejects.toThrow();
+      await expect(service.flowInit({ ...flowOpts, featurePrefix: '--global' })).rejects.toThrow();
+    });
+  });
+
+  describe('argument injection guards', () => {
+    it('rejects option-like remotes/branches in fetch, pull, push, getReflog, and invalid reset mode', async () => {
+      await expect(service.fetch('--upload-pack=id')).rejects.toThrow();
+      await expect(service.pull('--upload-pack=id')).rejects.toThrow();
+      await expect(service.pull('origin', '--upload-pack=id')).rejects.toThrow();
+      await expect(service.push('--receive-pack=id')).rejects.toThrow();
+      await expect(service.push('origin', '--exec=id')).rejects.toThrow();
+      await expect(service.getReflog(50, '--all')).rejects.toThrow();
+      await expect(service.reset('HEAD', 'hard --other' as 'hard')).rejects.toThrow(/Invalid reset mode/);
     });
   });
 });

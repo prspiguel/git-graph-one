@@ -93,7 +93,7 @@ describe('BranchesViewProvider', () => {
     expect(item.description).toBe('current ↑2 ↓1');
     expect(p.getCurrentItem()?.label).toBe('main');
     // setContext is pushed so the sidebar shows Push vs Publish correctly.
-    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'gitGraphPlus.currentBranchHasUpstream', true);
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('setContext', 'gitGraphOne.currentBranchHasUpstream', true);
   });
 
   it('excludes remote branches and returns [] on error', async () => {
@@ -153,7 +153,7 @@ describe('TagsViewProvider', () => {
     const items = await new TagsViewProvider(mockSvc({ tags })).getChildren();
     expect(items[0].label).toBe('v1.0');
     expect(items[0].description).toBe('abcdef1');
-    expect(items[0].command?.command).toBe('gitGraphPlus.showTagMenu');
+    expect(items[0].command?.command).toBe('gitGraphOne.showTagMenu');
     expect(themeId(items[0])).toBe('tag');
   });
 });
@@ -164,7 +164,7 @@ describe('StashesViewProvider', () => {
     const items = await new StashesViewProvider(mockSvc({ stashList })).getChildren();
     expect(items[0].label).toBe('stash@{0}');
     expect(items[0].description).toBe('WIP');
-    expect(items[0].command?.command).toBe('gitGraphPlus.showStashMenu');
+    expect(items[0].command?.command).toBe('gitGraphOne.showStashMenu');
   });
 });
 
@@ -253,8 +253,8 @@ describe('StatusBarManager', () => {
     expect(createFn).toHaveBeenCalledWith(2 /* Right */, 0);
     const item = createFn.mock.results.at(-1)!.value;
     expect(item.text).toBe('$(git-merge)');
-    expect(item.command).toBe('gitGraphPlus.open');
-    expect(item.tooltip).toContain('Git Graph+');
+    expect(item.command).toBe('gitGraphOne.open');
+    expect(item.tooltip).toContain('Git Graph One');
     expect(item.show).toHaveBeenCalled();
     mgr.dispose();
     expect(item.dispose).toHaveBeenCalled();

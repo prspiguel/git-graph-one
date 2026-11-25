@@ -61,7 +61,7 @@ jobs:
       - name: Upload .vsix artifact
         uses: actions/upload-artifact@v4
         with:
-          name: git-graph-plus-${{ github.ref_name }}
+          name: git-graph-one-${{ github.ref_name }}
           path: '*.vsix'
 
       - name: Publish to VS Code Marketplace

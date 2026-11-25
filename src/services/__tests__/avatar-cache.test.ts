@@ -167,4 +167,26 @@ describe('AvatarCache', () => {
     expect(uri).toMatch(/^data:image\/png;base64,/);
     expect(calls).toHaveLength(1);
   });
+
+  it('sanitizes invalid or traversal-like size values before building URL and disk path', async () => {
+    const { fetcher, calls } = makeFetcher();
+    const cache = new AvatarCache(tmpDir, fetcher);
+
+    const uri = await cache.get('alice@example.com', '../../escape' as unknown as number);
+
+    expect(uri).toMatch(/^data:image\/png;base64,/);
+    expect(calls[0]).toContain('s=32&d=retro');
+    const files = await fs.readdir(tmpDir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^[0-9a-f]{32}-32$/);
+  });
+
+  it('falls back to image/png for non-raster or unsafe content types', async () => {
+    const fetcher: AvatarFetcher = async () => ({ data: Buffer.from('<svg/>'), contentType: 'image/svg+xml' });
+    const cache = new AvatarCache(null, fetcher);
+
+    const uri = await cache.get('alice@example.com', 32);
+
+    expect(uri).toMatch(/^data:image\/png;base64,/);
+  });
 });

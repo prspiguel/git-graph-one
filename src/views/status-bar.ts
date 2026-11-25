@@ -10,8 +10,8 @@ export class StatusBarManager implements vscode.Disposable {
       0
     );
     this.statusItem.text = '$(git-merge)';
-    this.statusItem.command = 'gitGraphPlus.open';
-    this.statusItem.tooltip = 'Git Graph+ - ' + vscode.l10n.t('clickToOpen');
+    this.statusItem.command = 'gitGraphOne.open';
+    this.statusItem.tooltip = 'Git Graph One - ' + vscode.l10n.t('clickToOpen');
     this.disposables.push(this.statusItem);
 
     this.statusItem.show();

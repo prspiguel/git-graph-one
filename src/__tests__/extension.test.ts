@@ -22,6 +22,7 @@ vi.mock('vscode', () => ({
       },
     }),
     get workspaceFolders() { return H.workspaceFolders; },
+    isTrusted: true,
     onDidChangeWorkspaceFolders: () => ({ dispose() {} }),
     onDidChangeConfiguration: () => ({ dispose() {} }),
     onDidSaveTextDocument: () => ({ dispose() {} }),
@@ -47,7 +48,7 @@ vi.mock('vscode', () => ({
 }));
 
 vi.mock('fs', () => ({ existsSync: vi.fn(() => true) }));
-vi.mock('../git/git-binary', () => ({ setGitBinaryPath: vi.fn() }));
+vi.mock('../git/git-binary', () => ({ setGitBinaryPath: vi.fn(), setGitRestrictedMode: vi.fn() }));
 vi.mock('../panels/MainPanel', () => ({
   MainPanel: class {
     static currentPanel: unknown = undefined;
@@ -118,8 +119,8 @@ describe('activate', () => {
     H.workspaceFolders = undefined;
     const ctx = makeContext();
     activate(ctx);
-    expect(H.registeredCommands).toContain('git-graph-plus.open');
-    expect(H.registeredCommands).toContain('gitGraphPlus.open');
+    expect(H.registeredCommands).toContain('git-graph-one.open');
+    expect(H.registeredCommands).toContain('gitGraphOne.open');
     expect(H.treeViewsCreated).toEqual([]);
     expect(ctx.subscriptions.length).toBeGreaterThan(0);
   });
@@ -129,16 +130,16 @@ describe('activate', () => {
     const ctx = makeContext();
     expect(() => activate(ctx)).not.toThrow();
 
-    for (const id of ['gitGraphPlus.open', 'gitGraphPlus.refresh', 'gitGraphPlus.fetch', 'gitGraphPlus.pull', 'gitGraphPlus.push', 'gitGraphPlus.createBranch']) {
+    for (const id of ['gitGraphOne.open', 'gitGraphOne.refresh', 'gitGraphOne.fetch', 'gitGraphOne.pull', 'gitGraphOne.push', 'gitGraphOne.createBranch']) {
       expect(H.registeredCommands).toContain(id);
     }
     expect(H.registeredCommands.length).toBeGreaterThan(15);
     expect(H.treeViewsCreated).toEqual([
-      'gitGraphPlus.branches',
-      'gitGraphPlus.remotes',
-      'gitGraphPlus.tags',
-      'gitGraphPlus.stashes',
-      'gitGraphPlus.worktrees',
+      'gitGraphOne.branches',
+      'gitGraphOne.remotes',
+      'gitGraphOne.tags',
+      'gitGraphOne.stashes',
+      'gitGraphOne.worktrees',
     ]);
   });
 
@@ -151,7 +152,7 @@ describe('activate', () => {
     const ctx = makeContext();
     activate(ctx);
 
-    await H.commandHandlers['gitGraphPlus.addWorktree']();
+    await H.commandHandlers['gitGraphOne.addWorktree']();
 
     const { MainPanel } = await import('../panels/MainPanel');
     expect(MainPanel.showModalWithPanel).toHaveBeenCalledWith(ctx.extensionUri, {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// The config helpers read `gitGraphPlus.*` settings via the VS Code config API.
+// The config helpers read `gitGraphOne.*` settings via the VS Code config API.
 // The mock lets each test control what a given key returns; `undefined` means
 // "not set", so the getter hands back the caller-supplied default.
 const h = vi.hoisted(() => ({ values: {} as Record<string, unknown> }));

@@ -19,7 +19,7 @@ tsconfig.json
 vitest.config.mts
 coverage/**
 test-results.xml
-CLAUDE.md
+agent.md
 .gitignore
 **/*.map
 resources/*.gif

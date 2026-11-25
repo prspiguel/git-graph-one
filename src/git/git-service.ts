@@ -4,7 +4,7 @@ import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { bufferStream, BufferOverflowError } from '../utils/buffer-stream';
-import { getGitBinaryPath } from './git-binary';
+import { getGitBinaryPath, isGitRestrictedMode, getRestrictedGitArgs } from './git-binary';
 import { resolveGitDirs } from '../services/file-watcher-helpers';
 
 /** Default max bytes per stdout/stderr stream for a single git invocation.
@@ -61,7 +61,7 @@ export class GitService {
   private extraEnv: Record<string, string> = {};
   // Default per-command timeout (ms). Callers can override per call via the
   // `timeout` option; this is the fallback used when they don't. Configurable
-  // via the `gitGraphPlus.timeout` setting so large repos can extend it.
+  // via the `gitGraphOne.timeout` setting so large repos can extend it.
   private defaultTimeoutMs = 60000;
   private warningHandler: ((message: string) => void) | null = null;
   private authRetryHandler: ((remote?: string) => Promise<boolean>) | null = null;
@@ -83,7 +83,7 @@ export class GitService {
   /**
    * Override the default per-command timeout (in milliseconds). Non-positive
    * or non-finite values are ignored, keeping the built-in fallback. Wired to
-   * the `gitGraphPlus.timeout` setting so users with large repos can extend it.
+   * the `gitGraphOne.timeout` setting so users with large repos can extend it.
    */
   setDefaultTimeout(ms: number): void {
     if (typeof ms === 'number' && Number.isFinite(ms) && ms > 0) {
@@ -108,7 +108,7 @@ export class GitService {
   }
 
   private warn(message: string): void {
-    console.warn(`Git Graph+: ${message}`);
+    console.warn(`Git Graph One: ${message}`);
     try { this.warningHandler?.(message); } catch { /* never let a handler break a git call */ }
   }
 
@@ -162,6 +162,17 @@ export class GitService {
     }
     if (ref.startsWith('-')) {
       throw new GitError(`Ref must not start with '-': ${ref}`, null, []);
+    }
+  }
+
+  /** Worktree paths are absolute or user-chosen directories outside the repo, so
+   * only the option-injection check applies. */
+  private assertSafeWorktreePath(worktreePath: string, context: string): void {
+    if (typeof worktreePath !== 'string' || worktreePath.length === 0) {
+      throw new GitError(`Invalid path for ${context}`, null, []);
+    }
+    if (worktreePath.startsWith('-')) {
+      throw new GitError(`Path must not start with '-': ${worktreePath}`, null, []);
     }
   }
 
@@ -264,19 +275,21 @@ export class GitService {
     date: string;
     dangling: boolean;
   }>; hasMore: boolean }> {
+    this.assertSafeRef(ref, 'reflog');
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 200;
     const SEP = '\x1f';
     try {
       const out = await this.exec([
         'reflog', 'show', ref,
         `--format=%H${SEP}%h${SEP}%gd${SEP}%gs`,
         `--date=iso`,
-        `-n`, String(limit + 1),
+        `-n`, String(safeLimit + 1),
       ], { silent: true });
 
       const refName = ref === 'HEAD' ? 'HEAD' : ref.replace(/^refs\/(heads|remotes)\//, '');
       const allLines = out.trim().split('\n').filter(Boolean);
-      const hasMore = allLines.length > limit;
-      const lines = hasMore ? allLines.slice(0, limit) : allLines;
+      const hasMore = allLines.length > safeLimit;
+      const lines = hasMore ? allLines.slice(0, safeLimit) : allLines;
 
       const entries = lines.map((line, i) => {
         const parts = line.split(SEP);
@@ -338,6 +351,7 @@ export class GitService {
    */
   async getCommitSignature(hash: string): Promise<CommitSignature> {
     this.assertSafeRef(hash, 'getCommitSignature');
+    if (isGitRestrictedMode()) return { status: 'none' };
     try {
       const out = await this.exec(
         ['show', '--no-patch', '--format=%G?%x00%GS%x00%GK', hash],
@@ -369,7 +383,7 @@ export class GitService {
     // clicking a non-ASCII (Korean, etc.) file opened no diff. Applied as a
     // `-c` override so it's global, but kept out of the activity-log command
     // string to avoid clutter.
-    const spawnArgs = ['-c', 'core.quotePath=false', ...args];
+    const spawnArgs = ['-c', 'core.quotePath=false', ...getRestrictedGitArgs(), ...args];
 
     return new Promise((resolve, reject) => {
       const proc = spawn(getGitBinaryPath(), spawnArgs, {
@@ -478,8 +492,9 @@ export class GitService {
     // %G? is appended after %b only when signature verification is requested,
     // since it forces GPG verification of every commit in the log (slow on
     // large repos). %b never contains a NUL so the trailing column is unambiguous.
+    const includeSignature = Boolean(options?.includeSignature) && !isGitRestrictedMode();
     const format = '%x01%x02%x03%H%x00%h%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%s%x00%P%x00%D%x00%b'
-      + (options?.includeSignature ? '%x00%G?' : '');
+      + (includeSignature ? '%x00%G?' : '');
     const args = [
       'log',
       `--format=${format}`,
@@ -738,7 +753,7 @@ export class GitService {
         ]);
         return parseStashList(raw);
       } catch (err) {
-        console.warn('Git Graph+: failed to list stashes:', err instanceof Error ? err.message : err);
+        console.warn('Git Graph One: failed to list stashes:', err instanceof Error ? err.message : err);
         return [];
       }
     });
@@ -1385,6 +1400,7 @@ export class GitService {
   async fetch(remote?: string, options?: { prune?: boolean }): Promise<string> {
     const args = ['fetch'];
     if (remote) {
+      this.assertSafeRef(remote, 'fetch');
       args.push(remote);
     } else {
       args.push('--all');
@@ -1402,8 +1418,10 @@ export class GitService {
       args.push('--rebase');
     }
     if (remote) {
+      this.assertSafeRef(remote, 'pull');
       args.push(remote);
       if (branch) {
+        this.assertSafeRef(branch, 'pull');
         args.push(branch);
       }
     }
@@ -1421,8 +1439,10 @@ export class GitService {
       args.push('-u');
     }
     if (remote) {
+      this.assertSafeRef(remote, 'push');
       args.push(remote);
       if (branch) {
+        this.assertSafeRef(branch, 'push');
         // Use full refspec to avoid ambiguity when tag and branch names collide
         args.push(`refs/heads/${branch}`);
       }
@@ -1659,10 +1679,11 @@ export class GitService {
       // that cmd.exe / sh expansion handles repo paths containing &, |, (, ),
       // ^, etc. safely without manual escaping.
       await new Promise<void>((resolve, reject) => {
-        const proc = spawn(getGitBinaryPath(), ['rebase', '-i', base], {
+        const proc = spawn(getGitBinaryPath(), [...getRestrictedGitArgs(), 'rebase', '-i', base], {
           cwd: this.repoPath,
           env: {
             ...process.env,
+            ...this.extraEnv,
             GIT_TERMINAL_PROMPT: '0',
             LC_ALL: 'C',
             GIT_MERGE_AUTOEDIT: 'no',
@@ -1718,6 +1739,9 @@ export class GitService {
 
   async reset(ref: string, mode: 'soft' | 'mixed' | 'hard'): Promise<void> {
     this.assertSafeRef(ref, 'reset');
+    if (mode !== 'soft' && mode !== 'mixed' && mode !== 'hard') {
+      throw new GitError(`Invalid reset mode: ${String(mode)}`, null, ['reset']);
+    }
     await this.exec(['reset', `--${mode}`, ref]);
   }
 
@@ -1765,7 +1789,7 @@ export class GitService {
       const raw = await this.exec(['diff', '--name-only', '--diff-filter=U']);
       return raw.trim().split('\n').filter(Boolean);
     } catch (err) {
-      console.warn('Git Graph+: failed to get conflict files:', err instanceof Error ? err.message : err);
+      console.warn('Git Graph One: failed to get conflict files:', err instanceof Error ? err.message : err);
       return [];
     }
   }
@@ -2000,7 +2024,7 @@ export class GitService {
       const commits = parseLog(raw, remoteNames);
       return commits[0] ?? null;
     } catch (err) {
-      console.warn('Git Graph+: failed to get commit by hash:', err instanceof Error ? err.message : err);
+      console.warn('Git Graph One: failed to get commit by hash:', err instanceof Error ? err.message : err);
       return null;
     }
   }
@@ -2086,7 +2110,7 @@ export class GitService {
       if (err instanceof GitError && err.exitCode !== null && !this.isExpectedLfsFailure(err.stderr)) {
         this.warn(`LFS ls-files failed: ${err.stderr || err.message}`);
       }
-      console.warn('Git Graph+: LFS ls-files failed:', err instanceof Error ? err.message : err);
+      console.warn('Git Graph One: LFS ls-files failed:', err instanceof Error ? err.message : err);
       return [];
     }
   }
@@ -2112,7 +2136,7 @@ export class GitService {
       if (err instanceof GitError && err.exitCode !== null && !this.isExpectedLfsFailure(err.stderr)) {
         this.warn(`LFS locks failed: ${err.stderr || err.message}`);
       }
-      console.warn('Git Graph+: LFS locks failed:', err instanceof Error ? err.message : err);
+      console.warn('Git Graph One: LFS locks failed:', err instanceof Error ? err.message : err);
       return [];
     }
   }
@@ -2193,6 +2217,22 @@ export class GitService {
     hotfixPrefix: string;
     versionTagPrefix: string;
   }): Promise<string> {
+    this.assertSafeRef(options.productionBranch, 'flow init');
+    this.assertSafeRef(options.developBranch, 'flow init');
+    const assertSafePrefix = (prefix: string, allowEmpty: boolean) => {
+      if (typeof prefix !== 'string' || (!allowEmpty && prefix.length === 0)) {
+        throw new GitError('Invalid prefix for flow init', null, ['flow', 'init']);
+      }
+      // eslint-disable-next-line no-control-regex
+      if (prefix.startsWith('-') || /[\x00-\x1f\x7f]/.test(prefix)) {
+        throw new GitError(`Unsafe prefix for flow init: ${prefix}`, null, ['flow', 'init']);
+      }
+    };
+    assertSafePrefix(options.featurePrefix, false);
+    assertSafePrefix(options.releasePrefix, false);
+    assertSafePrefix(options.hotfixPrefix, false);
+    assertSafePrefix(options.versionTagPrefix, true);
+
     // production 브랜치 존재 여부 검증
     try {
       await this.exec(['rev-parse', '--verify', options.productionBranch]);
@@ -2278,7 +2318,7 @@ export class GitService {
         hotfixPrefix: hotfix,
         versionTagPrefix: versionTag,
       };
-    } catch (err) { console.warn('Git Graph+: failed to get flow config:', err instanceof Error ? err.message : err); return null; }
+    } catch (err) { console.warn('Git Graph One: failed to get flow config:', err instanceof Error ? err.message : err); return null; }
   }
 
   async getFlowBranches(): Promise<{ features: string[]; releases: string[]; hotfixes: string[] }> {
@@ -2305,6 +2345,7 @@ export class GitService {
   }
 
   async worktreeAdd(worktreePath: string, branch?: string, newBranch?: string): Promise<void> {
+    this.assertSafeWorktreePath(worktreePath, 'worktree add');
     if (newBranch) { this.assertSafeRef(newBranch, 'worktree add'); }
     if (branch) { this.assertSafeRef(branch, 'worktree add'); }
     const args = ['worktree', 'add'];
@@ -2319,6 +2360,7 @@ export class GitService {
   }
 
   async worktreeRemove(worktreePath: string, force?: boolean): Promise<void> {
+    this.assertSafeWorktreePath(worktreePath, 'worktree remove');
     const args = ['worktree', 'remove'];
     if (force) { args.push('--force'); }
     args.push(worktreePath);
@@ -2408,7 +2450,7 @@ export class GitService {
     }
     const MAX_IMAGE_SIZE = 50 * 1024 * 1024; // 50MB limit
     return new Promise((resolve, reject) => {
-      const proc = spawn(getGitBinaryPath(), ['show', `${ref}:${filePath}`], {
+      const proc = spawn(getGitBinaryPath(), [...getRestrictedGitArgs(), 'show', `${ref}:${filePath}`], {
         cwd: this.repoPath,
         env: { ...process.env, ...this.extraEnv, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', GIT_MERGE_AUTOEDIT: 'no', GIT_EDITOR: 'true', EDITOR: 'true' },
       });
@@ -2447,14 +2489,14 @@ export class GitService {
     try {
       await this.exec(['flow', 'version']);
       return true;
-    } catch (err) { console.warn('Git Graph+: flow version check failed:', err instanceof Error ? err.message : err); return false; }
+    } catch (err) { console.warn('Git Graph One: flow version check failed:', err instanceof Error ? err.message : err); return false; }
   }
 
   async isFlowInitialized(): Promise<boolean> {
     try {
       await this.exec(['config', '--get', 'gitflow.branch.master']);
       return true;
-    } catch (err) { console.warn('Git Graph+: flow init check failed:', err instanceof Error ? err.message : err); return false; }
+    } catch (err) { console.warn('Git Graph One: flow init check failed:', err instanceof Error ? err.message : err); return false; }
   }
 
 }

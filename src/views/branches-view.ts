@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { GitService } from '../git/git-service';
+import { isGitRestrictedMode } from '../git/git-binary';
 import type { BranchInfo } from '../git/types';
 
 type BranchTreeItem = BranchFolderItem | BranchLeafItem;
@@ -48,7 +49,7 @@ export class BranchesViewProvider implements vscode.TreeDataProvider<BranchTreeI
       const current = branches.find(b => b.current && !b.remote);
       // A "gone" upstream (remote branch deleted) counts as no upstream so the
       // sidebar shows Publish instead of Push, matching the toolbar button.
-      vscode.commands.executeCommand('setContext', 'gitGraphPlus.currentBranchHasUpstream', current ? (!!current.upstream && !current.upstreamGone) : true);
+      vscode.commands.executeCommand('setContext', 'gitGraphOne.currentBranchHasUpstream', current ? (!!current.upstream && !current.upstreamGone) : true);
     } catch { /* keep old cache */ }
     if (id === this.fetchId) {
       this.pending = null;
@@ -74,6 +75,7 @@ export class BranchesViewProvider implements vscode.TreeDataProvider<BranchTreeI
     }
 
     if (this.cache) return this.cache;
+    if (isGitRestrictedMode()) return [];
 
     // Direct fetch as fallback - always returns data
     try {
@@ -197,7 +199,7 @@ class BranchLeafItem extends vscode.TreeItem {
     this.tooltip = `${branch.name}${branch.upstream ? ` → ${branch.upstream}` : ''}`;
 
     this.command = {
-      command: 'gitGraphPlus.showBranchMenu',
+      command: 'gitGraphOne.showBranchMenu',
       title: 'Show Branch Menu',
       arguments: [{ branch: this.branch }],
     };

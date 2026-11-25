@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { GitService } from '../git/git-service';
+import { isGitRestrictedMode } from '../git/git-binary';
 import type { WorktreeInfo } from '../git/types';
 
 export class WorktreesViewProvider implements vscode.TreeDataProvider<WorktreeItem> {
@@ -40,6 +41,7 @@ export class WorktreesViewProvider implements vscode.TreeDataProvider<WorktreeIt
   async getChildren(element?: WorktreeItem): Promise<WorktreeItem[]> {
     if (element) return [];
     if (this.cache) return this.cache;
+    if (isGitRestrictedMode()) return [];
     try { this.cache = (await this.gitService.worktreeList()).map(w => new WorktreeItem(w, this.gitService.rootPath)); }
     catch { /* ignore */ }
     return this.cache ?? [];
@@ -69,7 +71,7 @@ class WorktreeItem extends vscode.TreeItem {
     }
     this.description = worktree.isMain ? '' : displayPath;
     this.command = {
-      command: 'gitGraphPlus.openWorktree',
+      command: 'gitGraphOne.openWorktree',
       title: 'Open Worktree',
       arguments: [this],
     };
